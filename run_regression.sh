@@ -129,6 +129,7 @@ esac
 if [ -z "${SKIP_GPU}" ] && [ -n "${CUDA_VISIBLE_DEVICES}" ]; then
     run_test SEARCH_GPU "run_search_gpu.sh"
     run_test SEARCH_GPU_SERVER "run_search_gpu_server.sh"
+    run_test GPUSEM "run_gpusem.sh"
 fi
 
 set -e
