@@ -270,6 +270,15 @@ fi
 stop_gpu_server TERM
 sleep 1
 
+# ── Test 12: no leftover gpuserver processes ──────────────────
+info "Test: no leftover gpuserver processes"
+leftover=$(pgrep -f "${MMSEQS}.*gpuserver" 2>/dev/null || true)
+if [ -z "$leftover" ]; then
+    pass "no leftover gpuserver processes"
+else
+    fail "leftover gpuserver processes: $leftover"
+fi
+
 # ── Report ────────────────────────────────────────────────────
 if [ "$FAILURES" -eq 0 ]; then
     echo "GOOD" > "${RESULTS}.report"
