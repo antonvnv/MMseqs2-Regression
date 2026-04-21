@@ -45,9 +45,9 @@ QUERY="${RESULTS}/query_500.fasta"
 QUERYDB="${RESULTS}/query"
 "${MMSEQS}" createdb "${QUERY}" "${QUERYDB}"
 
-TARGET="${DATADIR}/targetannotation.fasta"
+TARGET_FASTA="${DATADIR}/targetannotation.fasta"
 TARGETDB="${RESULTS}/targetannotation"
-"${MMSEQS}" createdb "${TARGET}" "${TARGETDB}_db"
+"${MMSEQS}" createdb "${TARGET_FASTA}" "${TARGETDB}_db"
 "${MMSEQS}" makepaddedseqdb "${TARGETDB}_db" "${TARGETDB}"
 
 SHM_HASH=""
@@ -79,12 +79,27 @@ start_gpu_server() {
 sem_path() { echo "/dev/shm/sem.${SHM_HASH}_sem"; }
 shm_path() { echo "/dev/shm/${SHM_HASH}"; }
 
+EXPECTED_ROC5="0.454819"
+
 run_search() {
     rm -rf "${RESULTS}/result_db"* "${RESULTS}/search_tmp"
     "${MMSEQS}" search "$QUERYDB" "$TARGETDB" "${RESULTS}/result_db" "${RESULTS}/search_tmp" \
         -e 10000 --max-seqs 1000 --prefilter-mode 1 --db-load-mode 2 \
         --gpu 1 --gpu-server 1 --split 1 --threads "$THREADS" \
         "$@"
+}
+
+# Validate search results via ROC5 AUC.  Returns 0 on match.
+check_search_results() {
+    "${MMSEQS}" convertalis "$QUERYDB" "$TARGETDB" "${RESULTS}/result_db" "${RESULTS}/results_aln.m8"
+    "${EVALUATE}" "$QUERY" "$TARGET_FASTA" "${RESULTS}/results_aln.m8" "${RESULTS}/evaluation_roc5.dat" 1000 1 \
+        | tee "${RESULTS}/evaluation.log"
+    ACTUAL=$(grep "^ROC5 AUC:" "${RESULTS}/evaluation.log" | cut -d" " -f3)
+    if [ "$ACTUAL" = "$EXPECTED_ROC5" ]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # ── Test 1: idle CPU usage ────────────────────────────────────
@@ -107,13 +122,13 @@ else
     fail "semaphore NOT found at $(sem_path)"
 fi
 
-# ── Test 3: functional search ────────────────────────────────
+# ── Test 3: functional search (ROC5 AUC validation) ──────────
 info "Test: functional search"
 run_search
-if [ -s "${RESULTS}/result_db.index" ]; then
-    pass "search produced non-empty results"
+if check_search_results; then
+    pass "search ROC5 AUC = $EXPECTED_ROC5"
 else
-    fail "search produced empty or missing results"
+    fail "search ROC5 AUC = $ACTUAL (expected $EXPECTED_ROC5)"
 fi
 
 # ── Test 4: CPU returns to idle after search ──────────────────
@@ -175,10 +190,10 @@ else
     fail "server failed to restart after SIGKILL"
 fi
 run_search
-if [ -s "${RESULTS}/result_db.index" ]; then
-    pass "search works after SIGKILL restart"
+if check_search_results; then
+    pass "search after SIGKILL ROC5 AUC = $EXPECTED_ROC5"
 else
-    fail "search failed after SIGKILL restart"
+    fail "search after SIGKILL ROC5 AUC = $ACTUAL (expected $EXPECTED_ROC5)"
 fi
 stop_gpu_server TERM
 sleep 1
@@ -244,10 +259,10 @@ CLIENT_PID=$!
 sleep 3
 start_gpu_server
 if wait "$CLIENT_PID"; then
-    if [ -s "${RESULTS}/result_db.index" ]; then
-        pass "client-first search succeeded after server started"
+    if check_search_results; then
+        pass "client-first search ROC5 AUC = $EXPECTED_ROC5"
     else
-        fail "client-first search produced empty results"
+        fail "client-first search ROC5 AUC = $ACTUAL (expected $EXPECTED_ROC5)"
     fi
 else
     fail "client-first search failed"
